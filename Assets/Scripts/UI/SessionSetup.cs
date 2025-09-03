@@ -119,22 +119,36 @@ public class SessionSetup : MonoBehaviour
 		}
 		else
 		{
-			ApplyConfig();
+			ApplyConfig(); // Ahora es seguro llamarlo siempre
 			UIScreen.activeScreen.Back();
 		}
-
 	}
 
 	public void ApplyConfig()
 	{
-		GameManager.Instance.CourseLengthIndex = courseLength;
-		GameManager.Instance.MaxStrokesIndex = maxShots;
-		GameManager.Instance.MaxTimeIndex = maxTime;
-		GameManager.Instance.DoCollisions = doCollisions;
-		// BUG? setting IsVisible to the value it is already invalidates SessionInfo
-		if (GameManager.Instance.Runner.SessionInfo.IsVisible != !IsPrivate)
-			GameManager.Instance.Runner.SessionInfo.IsVisible = !IsPrivate;
-	}
+		if (GameManager.Instance?.Runner?.SessionInfo == null)
+		{
+			Debug.LogWarning("Cannot apply config: GameManager Runner or SessionInfo is null. Skipping configuration.");
+			return;
+		}
 
+		try
+		{
+			GameManager.Instance.CourseLengthIndex = courseLength;
+			GameManager.Instance.MaxStrokesIndex = maxShots;
+			GameManager.Instance.MaxTimeIndex = maxTime;
+			GameManager.Instance.DoCollisions = doCollisions;
+        
+			// BUG? setting IsVisible to the value it is already invalidates SessionInfo
+			if (GameManager.Instance.Runner.SessionInfo.IsVisible != !IsPrivate)
+				GameManager.Instance.Runner.SessionInfo.IsVisible = !IsPrivate;
+            
+			Debug.Log("Configuration applied successfully");
+		}
+		catch (System.Exception e)
+		{
+			Debug.LogError($"Error applying configuration: {e.Message}");
+		}
+	}
 	#endregion
 }
