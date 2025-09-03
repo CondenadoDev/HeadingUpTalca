@@ -1,0 +1,120 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &6537956386830070957
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1310513788377212913}
+  - component: {fileID: 6640019007489209582}
+  m_Layer: 0
+  m_Name: ResourcesManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1310513788377212913
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6537956386830070957}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &6640019007489209582
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6537956386830070957}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 025c69a5241bc4344abc528b4bea932a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  playerControllerPrefab: {fileID: 4529645544484441695, guid: 483588457e5cfc343813735c5837680f, type: 3}
+  playerScoreUI: {fileID: 8997735982774647965, guid: 4208d507d91b0614ab6033a6ccca6160, type: 3}
+  scoreItem: {fileID: 5380632144143025864, guid: b737e946e579a8b46a3f7dfed26caff1, type: 3}
+  playerSessionItemUI: {fileID: 8110427814239826044, guid: cef8734064e7f794a98493e1e0a0ad86, type: 3}
+  worldNicknamePrefab: {fileID: 8065872449919320729, guid: 663e02d95a3b7724aa2abde78733bd66, type: 3}
+  splashEffect: {fileID: 8325642445358214007, guid: 29dc55e6d5664f946a8ff3fb31f296c2, type: 3}
+  levels:
+  - {fileID: -3133986413576114653, guid: 9e1e6c2b8b3eff44e9e1a6ed5b9f1c3c, type: 3}
+  - {fileID: 8233925923584800377, guid: a68d154e9e1131040ae0391f8e315506, type: 3}
+  - {fileID: -3133986413576114653, guid: ebe8fcb28dd4efe478ad2657aa9cb5df, type: 3}
+  - {fileID: 6448020259899196863, guid: 6e954cba72b30824083576c687754504, type: 3}
+  - {fileID: 8233925923584800377, guid: 15500895ba9ca474799f94934cc84630, type: 3}
+  - {fileID: 6126533143678557845, guid: bd6453f65539ce348ab07603e1a8c012, type: 3}
+  - {fileID: 2557901492658178570, guid: 7e56da77d4e7c483fac24a14d6f69d3b, type: 3}
+  - {fileID: 1007672788782970661, guid: 502712f42ea79f444985e10dff05af59, type: 3}
+  - {fileID: 2069820879271424610, guid: cf65357a68c806c4dba25794b39b9163, type: 3}
+  - {fileID: 4853102036966113645, guid: 478d035f019765b4d87ea36434433c85, type: 3}
+  - {fileID: 2153513373075878089, guid: f7c9e957e960e0d4bac048507e7274a2, type: 3}
+  - {fileID: 4666135361999724173, guid: fc5025557afa0c34c9595b227544724c, type: 3}
+  - {fileID: 6965601329199848164, guid: c4f4ec71d1bdcd14aa4563b5ccfce466, type: 3}
+  - {fileID: 2034699969442459320, guid: 0752136204500e542801b6bb8522b9ae, type: 3}
+  - {fileID: 3861357778147659547, guid: 234238ca735914120b33f912f96fd5d4, type: 3}
+  - {fileID: 8619654760963082576, guid: 15d8222e256ae3849a0a1e1a3a1684b2, type: 3}
+  - {fileID: 3024686141928793753, guid: 0d0d89a2da355f54eb8196b8971d2e71, type: 3}
+  - {fileID: 488958257332000135, guid: 0eba7cb72eadc904eb72c27c62b17918, type: 3}
+  skins:
+  - Name: Golf
+    ModelBones: {fileID: 0}
+    Mesh: {fileID: 763390538501458756, guid: 70f319e5e212b054c85b5176c6ecb053, type: 3}
+    Material: {fileID: 2100000, guid: b118c60fa99ea234a97de390d4ecca0d, type: 2}
+    Position: {x: 0, y: 0, z: 0}
+    Direction: {x: 0, y: 0, z: 0}
+    Scale: {x: 1, y: 1, z: 1}
+    DisplayScale: {x: 0, y: 0, z: 0}
+  - Name: Chinchilla
+    ModelBones: {fileID: 0}
+    Mesh: {fileID: -7143457144313767648, guid: bb029c70c357fe6428cd51ff414bd2f8, type: 3}
+    Material: {fileID: -6478536213147159724, guid: bb029c70c357fe6428cd51ff414bd2f8, type: 3}
+    Position: {x: 0, y: 0, z: 0.0034}
+    Direction: {x: -90, y: 0, z: 0}
+    Scale: {x: 0.05, y: 0.05, z: 0.05}
+    DisplayScale: {x: 0.04, y: 0.04, z: 0.04}
+  - Name: Zorro
+    ModelBones: {fileID: 6549644864831436650, guid: 001650255261dba4a9eef6fa4ab6601b, type: 3}
+    Mesh: {fileID: 5569628003908876322, guid: 551670ae922a3744497959ebfc7ad645, type: 3}
+    Material: {fileID: -6478536213147159724, guid: fcd43f468e5d8814bb74065a5564b239, type: 3}
+    Position: {x: 0, y: -0.021, z: -0.0012}
+    Direction: {x: -90, y: 0, z: 0}
+    Scale: {x: 4.3, y: 4.3, z: 4.3}
+    DisplayScale: {x: 2, y: 2, z: 2}
+  - Name: Elefante
+    ModelBones: {fileID: 0}
+    Mesh: {fileID: -2287299560618475982, guid: b85bd188273466646be7f91baa4bda82, type: 3}
+    Material: {fileID: -6478536213147159724, guid: fcd43f468e5d8814bb74065a5564b239, type: 3}
+    Position: {x: 0, y: 0, z: -0.0119}
+    Direction: {x: -90, y: 0, z: 0}
+    Scale: {x: 8.6, y: 8.6, z: 8.6}
+    DisplayScale: {x: 6, y: 6, z: 6}
+  - Name: Gato
+    ModelBones: {fileID: 0}
+    Mesh: {fileID: 5828280214069511035, guid: f84ed4ed1172d3c4bb98c13eae65b049, type: 3}
+    Material: {fileID: -6478536213147159724, guid: fcd43f468e5d8814bb74065a5564b239, type: 3}
+    Position: {x: 0, y: -0.0259, z: 0.0846}
+    Direction: {x: -90, y: 0, z: 0}
+    Scale: {x: 9.330141, y: 9.330141, z: 9.330141}
+    DisplayScale: {x: 6, y: 6, z: 6}
+  - Name: Gato
+    ModelBones: {fileID: 0}
+    Mesh: {fileID: 5828280214069511035, guid: f84ed4ed1172d3c4bb98c13eae65b049, type: 3}
+    Material: {fileID: -6478536213147159724, guid: fcd43f468e5d8814bb74065a5564b239, type: 3}
+    Position: {x: 0, y: -0.0259, z: 0.0846}
+    Direction: {x: -90, y: 0, z: 0}
+    Scale: {x: 9.330141, y: 9.330141, z: 9.330141}
+    DisplayScale: {x: 6, y: 6, z: 6}
