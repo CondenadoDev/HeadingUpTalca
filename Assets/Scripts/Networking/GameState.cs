@@ -16,6 +16,10 @@ public class GameState : NetworkBehaviour
 
 	protected StateMachine<EGameState> StateMachine = new StateMachine<EGameState>();
 
+	// OPTIMIZATION: Cache para UI updates
+	private int uiUpdateTick = 0;
+	private const int UI_UPDATE_INTERVAL = 10; // UI updates cada 10 ticks (~6 veces por segundo)
+
 	public override void Spawned()
 	{
 		if (Runner.IsServer)
@@ -34,17 +38,6 @@ public class GameState : NetworkBehaviour
 				}
 				UIScreen.activeScreen.BackTo(InterfaceManager.Instance.sessionScreen.screen);
 			}
-
-			//if (Runner.IsServer)
-			//{
-			//	//GameManager.Instance.CourseLength = SessionSetup.courseLength;
-			//	//GameManager.Instance.MaxTime = SessionSetup.maxTime;
-			//	//GameManager.Instance.MaxShots = SessionSetup.maxShots;
-			//	//GameManager.Instance.DoCollisions =
-			//	//GameManager.Instance.DoCollisions = SessionSetup.doCollisions;
-			//}
-
-			
 		};
 
 		StateMachine[EGameState.Pregame].onExit = next =>
@@ -111,7 +104,6 @@ public class GameState : NetworkBehaviour
 			float duration = 8f;
 			if (Runner.IsServer)
 			{
-                // Afterward, load the game mode using the GameManager RPC
                 GameManager.Instance.Rpc_LoadGameMode();
 
                 PlayerRegistry.ForEach(p =>
@@ -119,17 +111,15 @@ public class GameState : NetworkBehaviour
 					p.Controller.PuttTimer = TickTimer.CreateFromSeconds(Runner, duration);
 				});
 
-                // Loop through all players in the registry
                 PlayerRegistry.ForEachWhere(p => p.Controller, p =>
                 {
-                    // Assuming each player has a controller and we can call the RPC on it
-                    p.Controller.Rpc_ApplyGameModeRules(); // Call the game mode rules function on the player's controller
+                    p.Controller.Rpc_ApplyGameModeRules();
                 });
 
             }
             CameraController.Recenter();
             GameManager.Instance.StartGameRules();
-            HUD.SetLevelName(GameManager.Instance.CurrentHole);
+			HUD.SetLevelName(GameManager.Instance.CurrentHole);
 			HUD.SetStrokeCount(0);
 			HUD.SetTimerText(0);
 			HUD.SetLives(3);
@@ -143,9 +133,17 @@ public class GameState : NetworkBehaviour
 			Level.Current.TriggerEvents();
 		};
 
+		// OPTIMIZATION: Mover UI updates a intervalos fijos
 		StateMachine[EGameState.Game].onUpdate = () =>
 		{
-			HUD.SetTimerText(GameManager.Time);
+			// Solo actualizar UI cada N ticks para mejorar performance
+			uiUpdateTick++;
+			if (uiUpdateTick >= UI_UPDATE_INTERVAL)
+			{
+				HUD.SetTimerText(GameManager.Time);
+				uiUpdateTick = 0;
+			}
+
 			if ((Runner.IsServer && GameManager.ModifiedMaxTime > 0f && GameManager.Time >= GameManager.ModifiedMaxTime) ||
 				(Runner.IsServer && GameManager.Time >= GameManager.MaxTime))
             {
@@ -163,15 +161,12 @@ public class GameState : NetworkBehaviour
 
 			GameManager.Instance.TickStarted = 0;
 
-			// if there are more holes to play
 			if (GameManager.Instance.CurrentHole + 1 < Mathf.Min(ResourcesManager.Instance.levels.Length, GameManager.CourseLength))
 			{
-				// then load the next hole and delay set state to intro
 				Server_DelaySetState(EGameState.Loading, 5);
 			}
 			else
 			{
-				// else go to postgame
 				Server_DelaySetState(EGameState.Postgame, 5);
 			}
 		};
@@ -206,9 +201,7 @@ public class GameState : NetworkBehaviour
 			GameManager.Instance.TickStarted = 0;
 		};
 
-		// Ensures that FixedUpdateNetwork is called for all proxies.
 		Runner.SetIsSimulated(Object, true);
-
 		StateMachine.Update(Current, Previous);
 	}
 
@@ -230,7 +223,6 @@ public class GameState : NetworkBehaviour
 	public void Server_SetState(EGameState st)
 	{
 		if (Current == st) return;
-		//Debug.Log($"Set State to {st}");
 		Previous = Current;
 		Current = st;
 	}

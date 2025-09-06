@@ -17,8 +17,58 @@ public class PlayerRegistry : NetworkBehaviour, INetworkRunnerCallbacks
 	public static event System.Action<NetworkRunner, PlayerRef> OnPlayerJoined;
 	public static event System.Action<NetworkRunner, PlayerRef> OnPlayerLeft;
 
-	public static IEnumerable<PlayerObject> Everyone => Instance?.Object?.IsValid == true ? Instance.ObjectByRef.Select(kvp => kvp.Value) : Enumerable.Empty<PlayerObject>();
-	public static IEnumerable<PlayerObject> Players => Instance?.Object?.IsValid == true ? Instance.ObjectByRef.Where(kvp => kvp.Value && !kvp.Value.IsSpectator).Select(kvp => kvp.Value) : Enumerable.Empty<PlayerObject>();
+	// OPTIMIZATION: Cache collections para evitar LINQ repetido
+	private static List<PlayerObject> cachedEveryone = new List<PlayerObject>();
+	private static List<PlayerObject> cachedPlayers = new List<PlayerObject>();
+	private static bool cacheValid = false;
+	private static int lastFrameUpdated = -1;
+
+	public static IEnumerable<PlayerObject> Everyone 
+	{
+		get
+		{
+			UpdateCacheIfNeeded();
+			return cachedEveryone;
+		}
+	}
+	
+	public static IEnumerable<PlayerObject> Players 
+	{
+		get
+		{
+			UpdateCacheIfNeeded();
+			return cachedPlayers;
+		}
+	}
+
+	private static void UpdateCacheIfNeeded()
+	{
+		if (Time.frameCount == lastFrameUpdated && cacheValid) return;
+		
+		cachedEveryone.Clear();
+		cachedPlayers.Clear();
+		
+		if (Instance?.Object?.IsValid == true)
+		{
+			foreach (var kvp in Instance.ObjectByRef)
+			{
+				if (kvp.Value != null)
+				{
+					cachedEveryone.Add(kvp.Value);
+					if (!kvp.Value.IsSpectator)
+						cachedPlayers.Add(kvp.Value);
+				}
+			}
+		}
+		
+		cacheValid = true;
+		lastFrameUpdated = Time.frameCount;
+	}
+
+	private static void InvalidateCache()
+	{
+		cacheValid = false;
+	}
 
 	[Networked, Capacity(CAPACITY)]
 	NetworkDictionary<PlayerRef, PlayerObject> ObjectByRef { get; }
@@ -40,6 +90,7 @@ public class PlayerRegistry : NetworkBehaviour, INetworkRunnerCallbacks
 		Instance = null;
 		runner.RemoveCallbacks(this);
 		OnPlayerJoined = OnPlayerLeft = null;
+		InvalidateCache();
 	}
 
 	bool GetAvailable(out byte index)
@@ -79,7 +130,7 @@ public class PlayerRegistry : NetworkBehaviour, INetworkRunnerCallbacks
 			Instance.ObjectByRef.Add(pRef, pObj);
 			DontDestroyOnLoad(pObj.gameObject);
 			pObj.Server_Init(pRef, index);
-			//Instance.Rpc_PlayerJoined(pRef);
+			InvalidateCache();
 		}
 		else
 		{
@@ -89,6 +140,7 @@ public class PlayerRegistry : NetworkBehaviour, INetworkRunnerCallbacks
 	
 	public static void PlayerJoined(PlayerRef player)
 	{
+		InvalidateCache();
 		OnPlayerJoined?.Invoke(Instance.Runner, player);
 	}
 
@@ -103,6 +155,7 @@ public class PlayerRegistry : NetworkBehaviour, INetworkRunnerCallbacks
 		{
 			Debug.LogWarning("Could not remove player from registry");
 		}
+		InvalidateCache();
 	}
 
 	public static bool HasPlayer(PlayerRef pRef)
@@ -127,8 +180,6 @@ public class PlayerRegistry : NetworkBehaviour, INetworkRunnerCallbacks
 	public static IEnumerable<PlayerObject> Where(System.Predicate<PlayerObject> match, bool includeSpectators = false)
 	{
 		return (includeSpectators ? Everyone : Players).Where(p => match.Invoke(p));
-		
-		//return Instance.ObjectByRef.Where(kvp => match.Invoke(kvp.Value)).Select(kvp => kvp.Value);
 	}
 
 	public static PlayerObject First(System.Predicate<PlayerObject> match, bool includeSpectators = false)
@@ -150,46 +201,22 @@ public class PlayerRegistry : NetworkBehaviour, INetworkRunnerCallbacks
 	public static void ForEachWhere(System.Predicate<PlayerObject> match, System.Action<PlayerObject> action, bool includeSpectators = false)
 	{
 		(includeSpectators ? Everyone : Players).Where(p => match.Invoke(p)).ForEach(p => action.Invoke(p));
-		//foreach (PlayerObject p in (includeSpectators ? Everyone : Players).Where(p => match.Invoke(p)))
-		//{
-		//	action.Invoke(p);
-		//}
 	}
 
 	public static int CountWhere(System.Predicate<PlayerObject> match, bool includeSpectators = false)
 	{
 		return (includeSpectators ? Everyone : Players).Where(p => match.Invoke(p)).Count();
-
-		//int count = 0;
-		//foreach (var kvp in Instance.ObjectByRef)
-		//{
-		//	if (match.Invoke(kvp.Value))
-		//		count++;
-		//}
-		//return count;
 	}
 
 	public static bool Any(System.Predicate<PlayerObject> match, bool includeSpectators = false)
 	{
 		if (Instance == null) return false;
 		return (includeSpectators ? Everyone : Players).Where(p => match.Invoke(p)).Count() > 0;
-
-		//foreach (var kvp in Instance.ObjectByRef)
-		//{
-		//	if (match.Invoke(kvp.Value)) return true;
-		//}
-		//return false;
 	}
 
 	public static bool All(System.Predicate<PlayerObject> match, bool includeSpectators = false)
 	{
 		return (includeSpectators ? Everyone : Players).Where(p => !match.Invoke(p)).Count() == 0;
-
-		//foreach (var kvp in Instance.ObjectByRef)
-		//{
-		//	if (match.Invoke(kvp.Value) == false) return false;
-		//}
-		//return true;
 	}
 
 	public static IOrderedEnumerable<PlayerObject> OrderAsc<T>(
@@ -249,12 +276,12 @@ public class PlayerRegistry : NetworkBehaviour, INetworkRunnerCallbacks
         return null;
     }
 
-
     #endregion
 
     void INetworkRunnerCallbacks.OnPlayerLeft(NetworkRunner runner, PlayerRef player)
 	{
 		if (runner.IsServer) Server_Remove(runner, player);
+		InvalidateCache();
 		OnPlayerLeft?.Invoke(Runner, player);
 	}
 

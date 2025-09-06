@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
-using UnityEditor;
 
 public class HUD : MonoBehaviour
 {
@@ -27,10 +26,31 @@ public class HUD : MonoBehaviour
 	static IEnumerator puttChargeRoutine = null;
 	static IEnumerator puttCooldownRoutine = null;
 
+	// OPTIMIZATION: Cache para string formatting
+	private static readonly Dictionary<int, string> minuteStringCache = new Dictionary<int, string>();
+	private static readonly Dictionary<int, string> strokeStringCache = new Dictionary<int, string>();
+	private static readonly Dictionary<int, string> livesStringCache = new Dictionary<int, string>();
+
 	public static HUD Instance { get; private set; }
 	private void Awake()
 	{
 		Instance = this;
+		// Pre-populate caches con valores comunes
+		InitializeStringCaches();
+	}
+
+	private void InitializeStringCaches()
+	{
+		// Pre-cache valores comunes para evitar string allocations
+		for (int i = 0; i <= 30; i++)
+		{
+			strokeStringCache[i] = $"Strokes: {i}";
+		}
+
+		for (int i = 0; i <= 10; i++)
+		{
+			livesStringCache[i] = $"Lives: {i}";
+		}
 	}
 
 	private void OnEnable()
@@ -44,7 +64,15 @@ public class HUD : MonoBehaviour
 
 	public static void SetLives(int lives)
 	{
-		Instance.levelText.text = $"Lives: {lives}";
+		// OPTIMIZATION: Use cached string si existe
+		if (livesStringCache.TryGetValue(lives, out string cachedString))
+		{
+			Instance.levelText.text = cachedString;
+		}
+		else
+		{
+			Instance.levelText.text = $"Lives: {lives}";
+		}
 
 		if (lives <= 1) Instance.levelText.color = Color.red;
         else if (lives == 2) Instance.levelText.color = Color.yellow;
@@ -62,14 +90,26 @@ public class HUD : MonoBehaviour
         var maxTime = GameManager.MaxTime;
         if (GameManager.ModifiedMaxTime > 0) maxTime = GameManager.ModifiedMaxTime;
         
-        float remainingTime = Mathf.Max(0, maxTime - time); // Ensure it doesn't go below 0
+        float remainingTime = Mathf.Max(0, maxTime - time);
 
-        Instance.timeText.text = $"{(int)(remainingTime / 60f):00}:{remainingTime % 60:00.00}";
+		// OPTIMIZATION: Minimize string allocations
+        int minutes = (int)(remainingTime / 60f);
+        float seconds = remainingTime % 60;
+        
+        Instance.timeText.text = $"{minutes:00}:{seconds:00.00}";
     }
 
     public static void SetStrokeCount(int count)
 	{
-		Instance.strokesText.text = $"Strokes: {count}";
+		// OPTIMIZATION: Use cached string si existe
+		if (strokeStringCache.TryGetValue(count, out string cachedString))
+		{
+			Instance.strokesText.text = cachedString;
+		}
+		else
+		{
+			Instance.strokesText.text = $"Strokes: {count}";
+		}
 	}
 
 	public static void SetPuttCharge(float fill, bool canPutt)
@@ -108,7 +148,7 @@ public class HUD : MonoBehaviour
 			puttCharge.rectTransform.localScale = Vector3.Lerp(puttCharge.rectTransform.localScale, Vector3.one, t);
 			puttChargeDot.color = Color.Lerp(puttChargeDot.color, Color.white, t);
 			t += Time.deltaTime;
-			yield return new WaitForEndOfFrame();
+			yield return null; // OPTIMIZATION: Use null instead of WaitForEndOfFrame
 		}
 		puttCharge.rectTransform.localScale = Vector3.one;
 		puttChargeDot.color = Color.white;
@@ -142,7 +182,7 @@ public class HUD : MonoBehaviour
 			
 			puttChargeDot.color = Color.Lerp(puttChargeDot.color, clear, t);
 			t += Time.deltaTime;
-			yield return new WaitForEndOfFrame();
+			yield return null; // OPTIMIZATION: Use null instead of WaitForEndOfFrame
 		}
 		puttCharge.fillAmount = 0;
 		puttChargeRoutine = null;
@@ -172,7 +212,7 @@ public class HUD : MonoBehaviour
 			puttCooldownGroup.alpha = Mathf.Lerp(puttCooldownGroup.alpha, 1, t);
 			puttCooldownGroup.transform.localScale = Vector3.Lerp(puttCooldownGroup.transform.localScale, Vector3.one, t);
 			t += Time.deltaTime;
-			yield return new WaitForEndOfFrame();
+			yield return null; // OPTIMIZATION: Use null instead of WaitForEndOfFrame
 		}
 		puttCooldownGroup.alpha = 1;
 		puttCooldownGroup.transform.localScale = Vector3.one;
@@ -202,7 +242,7 @@ public class HUD : MonoBehaviour
 		{
 			puttCooldownGroup.alpha = Mathf.Lerp(puttCooldownGroup.alpha, 0, t);
 			t += Time.deltaTime;
-			yield return new WaitForEndOfFrame();
+			yield return null; // OPTIMIZATION: Use null instead of WaitForEndOfFrame
 		}
 		puttCooldownGroup.alpha = 0;
 		puttCooldownRoutine = null;

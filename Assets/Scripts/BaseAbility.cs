@@ -14,10 +14,13 @@ namespace Assets.Scripts
         private Putter putter;
 
         public float jumpForce = 3f;
-        public float cooldownTime = 3f; // Fixed cooldown duration
-        private float cooldownTimer = 0f; // Timer that counts down
+        public float cooldownTime = 3f;
+        private float cooldownTimer = 0f;
 
         public bool IsOnCooldown { get; private set; } = false;
+
+        // OPTIMIZATION: Cache para componentes
+        private Rigidbody cachedRigidbody;
 
         public void ActivateAbility(Putter Putter)
         {
@@ -30,22 +33,24 @@ namespace Assets.Scripts
                 return;
             }
 
-            var rb = putter.rb; // Get the rigid body of the putter
-            Vector3 worldUp = Vector3.up; // To keep the direction relative to the world
-            rb.linearVelocity = new Vector3(rb.linearVelocity.x, 0f, rb.linearVelocity.z); // Reset vertical velocity
-            rb.AddForce(worldUp * jumpForce, ForceMode.VelocityChange);
+            // OPTIMIZATION: Cache rigidbody en primera llamada
+            if (cachedRigidbody == null)
+                cachedRigidbody = putter.rb;
 
-            cooldownTimer = cooldownTime; // Set cooldown
+            Vector3 worldUp = Vector3.up;
+            cachedRigidbody.linearVelocity = new Vector3(cachedRigidbody.linearVelocity.x, 0f, cachedRigidbody.linearVelocity.z);
+            cachedRigidbody.AddForce(worldUp * jumpForce, ForceMode.VelocityChange);
+
+            cooldownTimer = cooldownTime;
             IsOnCooldown = true;
             Debug.Log($"{abilityName} activated: Jumping!");
         }
-
 
         public void TickCooldown()
         {
             if (IsOnCooldown)
             {
-                cooldownTimer -= Time.fixedDeltaTime; // Reduce cooldown over time
+                cooldownTimer -= Time.fixedDeltaTime;
 
                 if (cooldownTimer <= 0f)
                 {
@@ -61,14 +66,4 @@ namespace Assets.Scripts
             Debug.Log($"{abilityName} is ready to use again!");
         }
     }
-
-
-
-    /*public abstract class BaseAbility : MonoBehaviour
-    {
-        public string abilityName;
-        public string abilityDescription;
-
-        public abstract void ActivateAbility(GameObject user);
-    }*/
 }
