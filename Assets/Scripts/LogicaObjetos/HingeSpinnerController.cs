@@ -1,34 +1,40 @@
 ﻿using System.Collections.Generic;
 using UnityEngine;
 using Fusion;
+
 public class HingeSpinnerController : NetworkBehaviour
 {
     [Header("Spinner Settings")]
-    public List<HingeJoint> hinges; // List of hinge joints to control
-    public float startingSpeed = 10f; // Initial speed
-    public float maxSpeed = 100f; // Maximum speed
-    public float accelerationDuration = 10f; // Time to reach max speed
+    public List<HingeJoint> hinges;
+    public float startingSpeed = 10f;
+    public float maxSpeed = 100f;
+    public float accelerationDuration = 10f;
     
     private float speedIncreasePerSecond;
     private bool hasStarted = false;
     private float elapsedTime = 0f;
 
+    // OPTIMIZATION: Cache motor settings
+    private JointMotor[] cachedMotors;
+    private float lastSpeed = -1f;
+
     public override void Spawned()
     {
-        if (!Object.HasStateAuthority) return; // Only the server controls the physics
+        if (!Object.HasStateAuthority) return;
         
-        // Calculate the rate of speed increase per second
         speedIncreasePerSecond = (maxSpeed - startingSpeed) / accelerationDuration;
 
-        // Ensure all hinges start with the correct motor settings
-        foreach (var hinge in hinges)
+        // OPTIMIZATION: Pre-cache motor configurations
+        cachedMotors = new JointMotor[hinges.Count];
+        for (int i = 0; i < hinges.Count; i++)
         {
-            JointMotor motor = hinge.motor;
-            motor.force = 1000f; // Ensure it has enough force to spin
-            motor.targetVelocity = 0f; // Start stationary
-            motor.freeSpin = false;
-            hinge.motor = motor;
-            hinge.useMotor = true;
+            cachedMotors[i] = hinges[i].motor;
+            cachedMotors[i].force = 1000f;
+            cachedMotors[i].freeSpin = false;
+            cachedMotors[i].targetVelocity = 0f;
+            
+            hinges[i].motor = cachedMotors[i];
+            hinges[i].useMotor = true;
         }
     }
 
@@ -36,11 +42,10 @@ public class HingeSpinnerController : NetworkBehaviour
     {
         if (!Object.HasStateAuthority) return;
         
-        // Wait for GameManager.Time to start before spinning
         if (!hasStarted && GameManager.Time > 0)
         {
             hasStarted = true;
-            elapsedTime = 0f; // Reset elapsed time
+            elapsedTime = 0f;
         }
 
         if (hasStarted)
@@ -48,11 +53,15 @@ public class HingeSpinnerController : NetworkBehaviour
             elapsedTime += Runner.DeltaTime;
             float newSpeed = Mathf.Clamp(startingSpeed + (speedIncreasePerSecond * elapsedTime), startingSpeed, maxSpeed);
 
-            foreach (var hinge in hinges)
+            // OPTIMIZATION: Only update if speed changed significantly
+            if (Mathf.Abs(newSpeed - lastSpeed) > 0.1f)
             {
-                JointMotor motor = hinge.motor;
-                motor.targetVelocity = newSpeed;
-                hinge.motor = motor;
+                lastSpeed = newSpeed;
+                for (int i = 0; i < hinges.Count; i++)
+                {
+                    cachedMotors[i].targetVelocity = newSpeed;
+                    hinges[i].motor = cachedMotors[i];
+                }
             }
         }
     }

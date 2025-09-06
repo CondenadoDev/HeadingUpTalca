@@ -30,6 +30,19 @@ public class CameraController : MonoBehaviour
     float distance;
     Vector3 cachedPosition;
 
+    // OPTIMIZATION: Cache para evitar búsquedas repetidas de jugadores
+    private static PlayerObject cachedNextPlayer;
+    private static PlayerObject cachedPreviousPlayer;
+    private static int lastPlayerSearchFrame = -1;
+    
+    // OPTIMIZATION: Reduce frequency of expensive operations
+    private int updateCounter = 0;
+    private const int CAMERA_UPDATE_INTERVAL = 2; // Every 2 frames instead of every frame
+    
+    // OPTIMIZATION: Cache para verificaciones costosas
+    private bool lastRunnerState = false;
+    private int lastPlayerCount = 0;
+
     public static CameraController Instance { get; private set; }
     private void Awake()
     {
@@ -66,7 +79,6 @@ public class CameraController : MonoBehaviour
         }
     }
 
-
     public static bool HasControl(ICanControlCamera controller)
     {
         return Controller?.Equals(controller) == true;
@@ -79,12 +91,37 @@ public class CameraController : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (!(GameManager.Instance?.Runner?.IsRunning == true) || PlayerRegistry.CountPlayers == 0) return;
+        // OPTIMIZATION: Reduce frequency of expensive camera updates
+        updateCounter++;
+        if (updateCounter < CAMERA_UPDATE_INTERVAL) return;
+        updateCounter = 0;
 
-        if (con == null && PlayerRegistry.CountWhere(p => p.Controller) > 0 && (GameManager.State.Current == GameState.EGameState.Intro || GameManager.State.Current == GameState.EGameState.Game))
+        // OPTIMIZATION: Cache expensive state checks
+        bool currentRunnerState = GameManager.Instance?.Runner?.IsRunning == true;
+        int currentPlayerCount = PlayerRegistry.CountPlayers;
+        
+        if (!currentRunnerState || currentPlayerCount == 0) 
         {
-            AssignControl(PlayerRegistry.First(p => p.Controller != null).Controller);
+            lastRunnerState = currentRunnerState;
+            lastPlayerCount = currentPlayerCount;
+            return;
         }
+
+        // Only update player search if conditions changed
+        if (con == null && currentPlayerCount > 0 && 
+            (GameManager.State.Current == GameState.EGameState.Intro || GameManager.State.Current == GameState.EGameState.Game))
+        {
+            // OPTIMIZATION: Only search if state actually changed
+            if (!lastRunnerState || lastPlayerCount != currentPlayerCount)
+            {
+                var playerWithController = SafeFirstPlayer(p => p.Controller != null);
+                if (playerWithController != null)
+                    AssignControl(playerWithController.Controller);
+            }
+        }
+
+        lastRunnerState = currentRunnerState;
+        lastPlayerCount = currentPlayerCount;
 
         if (con == null) return;
 
@@ -94,16 +131,42 @@ public class CameraController : MonoBehaviour
             {
                 if (Input.GetMouseButtonDown(0))
                 {
-                    AssignControl(PlayerRegistry.NextWhere(PlayerRegistry.First(p => p.Controller == nb), p => p.Controller).Controller);
-                    if (con == null) return;
+                    // OPTIMIZATION: Cache player searches per frame
+                    if (Time.frameCount != lastPlayerSearchFrame)
+                    {
+                        var currentPlayer = SafeFirstPlayer(p => p.Controller == nb);
+                        if (currentPlayer != null)
+                        {
+                            cachedNextPlayer = PlayerRegistry.NextWhere(currentPlayer, p => p.Controller);
+                        }
+                        lastPlayerSearchFrame = Time.frameCount;
+                    }
+                    
+                    if (cachedNextPlayer?.Controller != null)
+                    {
+                        AssignControl(cachedNextPlayer.Controller);
+                        if (con == null) return;
+                    }
                 }
+                
                 if (Input.GetMouseButtonDown(1))
                 {
                     print("anterior");
-                    var previous = PlayerRegistry.PreviousWhere(PlayerRegistry.First(p => p.Controller == nb), p => p.Controller != null);
-                    if (previous != null) AssignControl(previous.Controller);
-
-                    if (con == null) return;
+                    if (Time.frameCount != lastPlayerSearchFrame)
+                    {
+                        var currentPlayer = SafeFirstPlayer(p => p.Controller == nb);
+                        if (currentPlayer != null)
+                        {
+                            cachedPreviousPlayer = PlayerRegistry.PreviousWhere(currentPlayer, p => p.Controller != null);
+                        }
+                        lastPlayerSearchFrame = Time.frameCount;
+                    }
+                    
+                    if (cachedPreviousPlayer?.Controller != null)
+                    {
+                        AssignControl(cachedPreviousPlayer.Controller);
+                        if (con == null) return;
+                    }
                 }
             }
         }
@@ -134,6 +197,19 @@ public class CameraController : MonoBehaviour
             speedLines.transform.rotation = Quaternion.LookRotation(con.Position - cachedPosition);
 
         cachedPosition = con.Position;
+    }
+
+    // OPTIMIZATION: Helper method for safe PlayerRegistry searches
+    private static PlayerObject SafeFirstPlayer(System.Predicate<PlayerObject> match)
+    {
+        try
+        {
+            return PlayerRegistry.First(match);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public static void Recenter()
