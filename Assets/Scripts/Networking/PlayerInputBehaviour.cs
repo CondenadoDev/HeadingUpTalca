@@ -8,6 +8,11 @@ using Fusion.Sockets;
 public class PlayerInputBehaviour : Fusion.Behaviour, INetworkRunnerCallbacks
 {
 	float accumulatedDelta = 0;
+	
+	// IMPROVED INPUT: Más datos para mejor sincronización
+	private Vector3 lastCameraPosition;
+	private Vector3 lastPlayerPosition;
+	private bool wasGrounded = false;
 
 	private void Update()
 	{
@@ -31,8 +36,44 @@ public class PlayerInputBehaviour : Fusion.Behaviour, INetworkRunnerCallbacks
 		Vector3 forward = CameraController.Instance.transform.forward;
 		fwInput.yaw = Mathf.Atan2(forward.x, forward.z) * Mathf.Rad2Deg;
 		
+		// IMPROVED INPUT: Añadir más datos para mejor sincronización
+		fwInput.playerPosition = PlayerObject.Local.Controller.transform.position;
+		fwInput.playerRotation = PlayerObject.Local.Controller.transform.rotation;
+		fwInput.playerVelocity = PlayerObject.Local.Controller.rb.linearVelocity;
+		fwInput.cameraPosition = CameraController.Instance.transform.position;
+		fwInput.cameraRotation = CameraController.Instance.transform.rotation;
+		
+		// Detectar cambios significativos para forzar updates
+		fwInput.hasSignificantMovement = 
+			Vector3.Distance(fwInput.playerPosition, lastPlayerPosition) > 0.01f ||
+			Vector3.Distance(fwInput.cameraPosition, lastCameraPosition) > 0.01f ||
+			fwInput.playerVelocity.magnitude > 0.1f;
+			
+		// Input de teclado para movimiento adicional si es necesario
+		fwInput.horizontalInput = Input.GetAxis("Horizontal");
+		fwInput.verticalInput = Input.GetAxis("Vertical");
+		
+		// Datos de estado del jugador
+		if (PlayerObject.Local.Controller.TryGetComponent<Putter>(out Putter putter))
+		{
+			fwInput.isGrounded = Physics.OverlapSphere(
+				putter.transform.position, 
+				putter.collider.radius * 1.05f,
+				LayerMask.GetMask("Default"), 
+				QueryTriggerInteraction.Ignore).Length > 0;
+				
+			fwInput.groundedStateChanged = fwInput.isGrounded != wasGrounded;
+			wasGrounded = fwInput.isGrounded;
+		}
+		
+		// Timestamp para interpolación
+		fwInput.timestamp = runner.SimulationTime;
+		
 		input.Set(fwInput);
 
+		// Cache para próximo frame
+		lastCameraPosition = fwInput.cameraPosition;
+		lastPlayerPosition = fwInput.playerPosition;
 		accumulatedDelta = 0;
 	}
 
@@ -69,4 +110,17 @@ public struct PlayerInput : INetworkInput
 	public bool isDragging;
 	public float dragDelta;
 	public Angle yaw;
+	
+	// IMPROVED INPUT: Datos adicionales para mejor sincronización
+	public Vector3 playerPosition;
+	public Quaternion playerRotation;
+	public Vector3 playerVelocity;
+	public Vector3 cameraPosition;
+	public Quaternion cameraRotation;
+	public bool hasSignificantMovement;
+	public float horizontalInput;
+	public float verticalInput;
+	public bool isGrounded;
+	public bool groundedStateChanged;
+	public float timestamp;
 }

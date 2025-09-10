@@ -28,6 +28,9 @@ public class Matchmaker : MonoBehaviour, INetworkRunnerCallbacks
 
 	bool _private = false;
 	string _roomCode = null;
+	
+	// PLAYER LIMIT: Constante para máximo de jugadores
+	public const int MAX_PLAYERS = 8;
 
 	private void Awake()
 	{
@@ -74,7 +77,12 @@ public class Matchmaker : MonoBehaviour, INetworkRunnerCallbacks
 		{
 			GameMode = GameMode.Host,
 			SessionName = code,
-			SceneManager = Runner.GetComponent<INetworkSceneManager>()
+			SceneManager = Runner.GetComponent<INetworkSceneManager>(),
+			PlayerCount = MAX_PLAYERS, // Límite de jugadores establecido
+			SessionProperties = new Dictionary<string, SessionProperty>()
+			{
+				{ "MaxPlayers", MAX_PLAYERS }
+			}
 		});
 		while (!task.IsCompleted)
 		{
@@ -84,8 +92,12 @@ public class Matchmaker : MonoBehaviour, INetworkRunnerCallbacks
 
 		if (result.Ok)
 		{
-			//Runner.SessionInfo.IsVisible = !_private;
-			//Debug.Log($"Private bool is {_private}. Session is {(Runner.SessionInfo.IsVisible ? "public" : "private")}");
+			// El MaxPlayers se establece automáticamente por Fusion basado en PlayerCount
+			// Solo configuramos la visibilidad
+			Runner.SessionInfo.IsVisible = !_private;
+			
+			Debug.Log($"Session created with max {MAX_PLAYERS} players. Private: {_private}. Session is {(Runner.SessionInfo.IsVisible ? "public" : "private")}");
+			
 			if (successCallback != null)
 				successCallback.Invoke();
 			else
@@ -128,7 +140,6 @@ public class Matchmaker : MonoBehaviour, INetworkRunnerCallbacks
 				SessionName = sessionCode,
 				SceneManager = Runner.GetComponent<INetworkSceneManager>(),
 				EnableClientSessionCreation = false,
-				//DisableClientSessionCreation = true (Assuming this has been swapped?)
 			});
 		while (!task.IsCompleted)
 		{
@@ -138,10 +149,10 @@ public class Matchmaker : MonoBehaviour, INetworkRunnerCallbacks
 
 		if (result.Ok)
 		{
+			Debug.Log($"Joined session. Current players: {Runner.ActivePlayers.Count()}/{MAX_PLAYERS}");
+			
 			if (successCallback != null)
 				successCallback.Invoke();
-			//else
-			//	Runner.LoadScene(gameScene);
 		}
 		else
 		{
@@ -207,19 +218,75 @@ public class Matchmaker : MonoBehaviour, INetworkRunnerCallbacks
 
 	public void OnSessionListUpdated(NetworkRunner runner, List<SessionInfo> sessionList)
 	{
-		//Debug.Log("SessionListUpdated:\n" + string.Join("\n", sessionList.Select(s => $"{s.Name} [{s.PlayerCount}/{s.MaxPlayers}]")));
+		Debug.Log("SessionListUpdated:\n" + string.Join("\n", sessionList.Select(s => $"{s.Name} [{s.PlayerCount}/{s.MaxPlayers}] - {(s.IsOpen ? "Open" : "Closed")}")));
 
 		int i = 0;
 		for (; i < sessionList.Count; i++)
 		{
 			SessionInfo sessionInfo = sessionList[i];
-			GetSessionItem(i).Init(sessionInfo.Name, sessionInfo.PlayerCount, sessionInfo.MaxPlayers, sessionInfo.IsOpen);
+			
+			// Filtrar sesiones que estén llenas o que excedan nuestro límite
+			bool canJoin = sessionInfo.IsOpen && 
+						   sessionInfo.PlayerCount < MAX_PLAYERS && 
+						   sessionInfo.PlayerCount < sessionInfo.MaxPlayers;
+			
+			GetSessionItem(i).Init(sessionInfo.Name, sessionInfo.PlayerCount, sessionInfo.MaxPlayers, canJoin);
 		}
 
 		for (; i < sessionItems.Count; i++)
 		{
 			sessionItems[i].Disable();
 		}
+	}
+
+	// PLAYER LIMIT: Callback para verificar cuando un jugador se une
+	public void OnPlayerJoined(NetworkRunner runner, PlayerRef player)
+	{
+		int currentPlayers = runner.ActivePlayers.Count();
+		int maxAllowed = runner.SessionInfo.MaxPlayers;
+		
+		Debug.Log($"Player {player} joined. Current players: {currentPlayers}/{maxAllowed} (our limit: {MAX_PLAYERS})");
+		
+		// Usar el menor entre nuestro límite y el límite de la sesión
+		int effectiveLimit = Mathf.Min(MAX_PLAYERS, maxAllowed);
+		
+		if (currentPlayers >= effectiveLimit)
+		{
+			Debug.Log($"Maximum player limit reached! ({effectiveLimit})");
+			// Cerrar la sesión para nuevos jugadores
+			if (runner.IsServer)
+			{
+				runner.SessionInfo.IsOpen = false;
+				Debug.Log("Session closed to new players");
+			}
+		}
+	}
+
+	public void OnPlayerLeft(NetworkRunner runner, PlayerRef player)
+	{
+		int currentPlayers = runner.ActivePlayers.Count();
+		int maxAllowed = runner.SessionInfo.MaxPlayers;
+		int effectiveLimit = Mathf.Min(MAX_PLAYERS, maxAllowed);
+		
+		Debug.Log($"Player {player} left. Current players: {currentPlayers}/{effectiveLimit}");
+		
+		// Reabrir la sesión si hay espacio disponible
+		if (currentPlayers < effectiveLimit && runner.IsServer)
+		{
+			runner.SessionInfo.IsOpen = true;
+			Debug.Log("Session reopened to new players");
+		}
+	}
+
+	public bool CanAcceptMorePlayers()
+	{
+		if (Runner == null) return true;
+		
+		int currentPlayers = Runner.ActivePlayers.Count();
+		int maxAllowed = Runner.SessionInfo.MaxPlayers;
+		int effectiveLimit = Mathf.Min(MAX_PLAYERS, maxAllowed);
+		
+		return currentPlayers < effectiveLimit;
 	}
 
 	public void OnShutdown(NetworkRunner runner, ShutdownReason shutdownReason)
@@ -242,8 +309,6 @@ public class Matchmaker : MonoBehaviour, INetworkRunnerCallbacks
 	public void OnInputMissing(NetworkRunner runner, PlayerRef player, NetworkInput input) { }
 	public void OnSceneLoadStart(NetworkRunner runner) { }
 	public void OnSceneLoadDone(NetworkRunner runner) { }
-	public void OnPlayerJoined(NetworkRunner runner, PlayerRef player) { }
-	public void OnPlayerLeft(NetworkRunner runner, PlayerRef player) { }
 	public void OnReliableDataReceived(NetworkRunner runner, PlayerRef player, System.ArraySegment<byte> data) { }
 	public void OnUserSimulationMessage(NetworkRunner runner, SimulationMessagePtr message) { }
 	public void OnObjectExitAOI(NetworkRunner runner, NetworkObject obj, PlayerRef player) { }

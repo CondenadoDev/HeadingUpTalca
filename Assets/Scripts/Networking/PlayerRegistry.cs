@@ -9,7 +9,7 @@ using System;
 
 public class PlayerRegistry : NetworkBehaviour, INetworkRunnerCallbacks
 {
-	public const byte CAPACITY = 10;
+	public const byte CAPACITY = 8; // Reducido de 10 a 8
 	public static PlayerRegistry Instance { get; private set; }
 	public static int CountAll => Instance.Object.IsValid ? Instance.ObjectByRef.Count : 0;
 	public static int CountPlayers => Instance.Object.IsValid ? CountWhere(p => !p.IsSpectator) : 0;
@@ -18,8 +18,8 @@ public class PlayerRegistry : NetworkBehaviour, INetworkRunnerCallbacks
 	public static event System.Action<NetworkRunner, PlayerRef> OnPlayerLeft;
 
 	// OPTIMIZATION: Cache collections para evitar LINQ repetido
-	private static List<PlayerObject> cachedEveryone = new List<PlayerObject>();
-	private static List<PlayerObject> cachedPlayers = new List<PlayerObject>();
+	private static List<PlayerObject> cachedEveryone = new List<PlayerObject>(8); // Pre-size para 8 jugadores
+	private static List<PlayerObject> cachedPlayers = new List<PlayerObject>(8);
 	private static bool cacheValid = false;
 	private static int lastFrameUpdated = -1;
 
@@ -103,6 +103,7 @@ public class PlayerRegistry : NetworkBehaviour, INetworkRunnerCallbacks
 		else if (ObjectByRef.Count == CAPACITY)
 		{
 			index = default;
+			Debug.LogWarning($"Maximum player capacity ({CAPACITY}) reached!");
 			return false;
 		}
 
@@ -125,12 +126,20 @@ public class PlayerRegistry : NetworkBehaviour, INetworkRunnerCallbacks
 	{
 		Debug.Assert(runner.IsServer);
 
+		// Verificación adicional de capacidad
+		if (Instance.ObjectByRef.Count >= CAPACITY)
+		{
+			Debug.LogError($"Cannot add player {pRef}: Maximum capacity ({CAPACITY}) reached!");
+			return;
+		}
+
 		if (Instance.GetAvailable(out byte index))
 		{
 			Instance.ObjectByRef.Add(pRef, pObj);
 			DontDestroyOnLoad(pObj.gameObject);
 			pObj.Server_Init(pRef, index);
 			InvalidateCache();
+			Debug.Log($"Player {pRef} added. Total players: {Instance.ObjectByRef.Count}/{CAPACITY}");
 		}
 		else
 		{
@@ -149,11 +158,15 @@ public class PlayerRegistry : NetworkBehaviour, INetworkRunnerCallbacks
 		Debug.Assert(runner.IsServer);
 		Debug.Assert(pRef.IsRealPlayer);
 
-		Debug.Log($"Removing player {pRef}");
+		Debug.Log($"Removing player {pRef}. Players before removal: {Instance.ObjectByRef.Count}/{CAPACITY}");
 
 		if (Instance.ObjectByRef.Remove(pRef) == false)
 		{
 			Debug.LogWarning("Could not remove player from registry");
+		}
+		else
+		{
+			Debug.Log($"Player {pRef} removed. Remaining players: {Instance.ObjectByRef.Count}/{CAPACITY}");
 		}
 		InvalidateCache();
 	}
@@ -173,6 +186,11 @@ public class PlayerRegistry : NetworkBehaviour, INetworkRunnerCallbacks
 	public static bool IsHost(PlayerRef pRef)
 	{
 		return GetPlayer(pRef)?.Index == 0;
+	}
+
+	public static bool CanJoinAsPlayer()
+	{
+		return CountPlayers < CAPACITY;
 	}
 
 	#region Utility Methods

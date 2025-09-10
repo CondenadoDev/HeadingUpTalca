@@ -64,10 +64,30 @@ public class Putter : NetworkBehaviour, ICanControlCamera
     public TickTimer PuttTimer { get; set; }
     public bool CanPutt => PuttTimer.ExpiredOrNotRunning(Runner);
     public bool couldPutt;
-
+    
+    // INTERPOLATION SETTINGS
+    [SerializeField] private float maxInterpolationDistance = 5f;
+    [SerializeField] private float interpolationSpeed = 10f;
+    
     [Networked]
     float PuttStrength { get; set; }
     float PuttStrengthNormalized => PuttStrength / maxPuttStrength;
+
+    // NETWORK SYNC OPTIMIZADO - Menos frecuente, solo cambios significativos
+    [Networked, OnChangedRender(nameof(OnNetworkDataChanged))]
+    public Vector3 NetworkPosition { get; set; }
+    
+    [Networked, OnChangedRender(nameof(OnNetworkDataChanged))]
+    public Quaternion NetworkRotation { get; set; }
+    
+    [Networked, OnChangedRender(nameof(OnNetworkDataChanged))]
+    public Vector3 NetworkVelocity { get; set; }
+    
+    [Networked]
+    public bool IsMoving { get; set; }
+    
+    [Networked]
+    public bool IsGroundedNetwork { get; set; }
 
     [Networked]
     PlayerInput CurrInput { get; set; }
@@ -78,14 +98,24 @@ public class Putter : NetworkBehaviour, ICanControlCamera
 
     bool isFirstUpdate = true;
 
-    // OPTIMIZATION: Cache para IsGrounded
+    // OPTIMIZATION: Caches mejorados
     private bool isGroundedCached = false;
     private int groundCheckTick = 0;
-    private const int GROUND_CHECK_INTERVAL = 3; // Cada 3 ticks en lugar de cada tick
+    private const int GROUND_CHECK_INTERVAL = 4; // Reducido para mejor responsividad
 
-    // OPTIMIZATION: Cache para ability cooldown
     private int abilityCooldownTick = 0;
-    private const int ABILITY_COOLDOWN_INTERVAL = 5; // Cada 5 ticks
+    private const int ABILITY_COOLDOWN_INTERVAL = 8; // Menos frecuente
+
+    private int networkSyncTick = 0;
+    private const int NETWORK_SYNC_INTERVAL = 3; // Más frecuente para mejor sincronización
+
+    // OPTIMIZATION: Cache para UI updates - SEPARAR DE NETWORK LOGIC
+    private int uiUpdateTick = 0;
+    private const int UI_UPDATE_INTERVAL = 5; // UI updates menos frecuentes
+
+    // OPTIMIZATION: Cache para velocity magnitude
+    private float velocityMagnitudeSquared = 0f;
+    private bool isMovingCached = false;
 
     public Rigidbody rb;
 
@@ -95,12 +125,74 @@ public class Putter : NetworkBehaviour, ICanControlCamera
         ApplyWeightSettings();
     }
 
+    private void Update()
+    {
+        // SEPARAR UI LOGIC DEL NETWORK THREAD - Crítico para performance
+        if (CameraController.HasControl(this))
+        {
+            UpdateUI();
+        }
+    }
+
+    private void UpdateUI()
+    {
+        // UI updates ejecutándose a 60fps en lugar de network rate
+        if (!CanPutt && couldPutt) HUD.ShowPuttCooldown();
+        if (CanPutt && !couldPutt) HUD.HidePuttCooldown();
+        if (PuttTimer.RemainingTime(Runner).HasValue) 
+        {
+            HUD.SetPuttCooldown(PuttTimer.RemainingTime(Runner).Value / 3f);
+        }
+    }
+
     private void LateUpdate()
     {
         if (CameraController.HasControl(this))
         {
-            // Update arrow rotation
+            // Update arrow rotation - más suave
             guideArrow.rotation = Quaternion.AngleAxis((float)yaw + swingAngle, Vector3.up);
+        }
+
+        // INTERPOLACION MENOS AGRESIVA: Para evitar blur de movimiento
+        if (!Object.HasInputAuthority && !isFirstUpdate)
+        {
+            float distanceToTarget = Vector3.Distance(transform.position, NetworkPosition);
+            
+            if (distanceToTarget < maxInterpolationDistance && distanceToTarget > 0.02f) // Umbral más alto
+            {
+                // Interpolación más directa, menos predicción
+                float lerpSpeed = Time.deltaTime * interpolationSpeed;
+                
+                // Solo interpolar posición si la diferencia es significativa
+                if (distanceToTarget > 0.05f)
+                {
+                    transform.position = Vector3.Lerp(transform.position, NetworkPosition, lerpSpeed);
+                }
+                
+                // Rotación menos frecuente para evitar jitter visual
+                if (Quaternion.Angle(transform.rotation, NetworkRotation) > 2f)
+                {
+                    transform.rotation = Quaternion.Slerp(transform.rotation, NetworkRotation, lerpSpeed * 0.7f);
+                }
+                
+                // Velocidad solo si realmente se está moviendo
+                if (IsMoving && NetworkVelocity.magnitude > 0.15f)
+                {
+                    rb.linearVelocity = Vector3.Lerp(rb.linearVelocity, NetworkVelocity, lerpSpeed * 0.6f);
+                }
+                else if (!IsMoving)
+                {
+                    // Si no se está moviendo, detener gradualmente
+                    rb.linearVelocity = Vector3.Lerp(rb.linearVelocity, Vector3.zero, lerpSpeed * 2f);
+                }
+            }
+            else if (distanceToTarget >= maxInterpolationDistance)
+            {
+                // Teleport directo para corregir desync
+                transform.position = NetworkPosition;
+                transform.rotation = NetworkRotation;
+                rb.linearVelocity = NetworkVelocity;
+            }
         }
     }
 
@@ -149,7 +241,34 @@ public class Putter : NetworkBehaviour, ICanControlCamera
 
         if (Runner.IsForward)
         {
-            // OPTIMIZATION: Solo ejecutar ability cooldown cada N ticks
+            // OPTIMIZATION: Cache velocity calculations una sola vez
+            velocityMagnitudeSquared = rb.linearVelocity.sqrMagnitude;
+            isMovingCached = velocityMagnitudeSquared > 0.0001f; // Usar sqrMagnitude
+
+            // NETWORK SYNC SIMPLIFICADO: Solo para casos críticos
+            networkSyncTick++;
+            if (networkSyncTick >= NETWORK_SYNC_INTERVAL && Object.HasInputAuthority)
+            {
+                // Solo sincronizar cambios MUY significativos o eventos importantes
+                float positionDelta = Vector3.Distance(transform.position, NetworkPosition);
+                
+                // Solo sync en casos críticos: golpes, teleports, etc.
+                bool criticalChange = (positionDelta > 0.5f) || // Cambio de posición grande
+                                    (isMovingCached != IsMoving) || // Cambio de estado de movimiento
+                                    (PuttStrength > 0 && !prevInput.isDragging && CurrInput.isDragging); // Nuevo golpe
+                
+                if (criticalChange)
+                {
+                    NetworkPosition = transform.position;
+                    NetworkRotation = transform.rotation;
+                    NetworkVelocity = rb.linearVelocity;
+                    IsMoving = isMovingCached;
+                    IsGroundedNetwork = isGroundedCached;
+                }
+                networkSyncTick = 0;
+            }
+
+            // OPTIMIZATION: Ability cooldown menos frecuente
             abilityCooldownTick++;
             if (abilityCooldownTick >= ABILITY_COOLDOWN_INTERVAL)
             {
@@ -157,13 +276,13 @@ public class Putter : NetworkBehaviour, ICanControlCamera
                 abilityCooldownTick = 0;
             }
 
-            // Store velocity for movement tracking
-            if (rb != null && rb.linearVelocity.magnitude > 0.01f)
+            // Store velocity for movement tracking - solo si se está moviendo
+            if (isMovingCached)
             {
                 lastVelocity = new Vector3(rb.linearVelocity.x, 0, rb.linearVelocity.z);
             }
 
-            // OPTIMIZATION: Cache ground check cada N ticks
+            // OPTIMIZATION: Ground check menos frecuente
             groundCheckTick++;
             if (groundCheckTick >= GROUND_CHECK_INTERVAL)
             {
@@ -171,9 +290,10 @@ public class Putter : NetworkBehaviour, ICanControlCamera
                 groundCheckTick = 0;
             }
 
+            // Movement logic optimizado
             if (isGroundedCached)
             {
-                if (rb.linearVelocity.sqrMagnitude <= 0.00001f)
+                if (velocityMagnitudeSquared <= 0.00001f)
                 {
                     if (!isStandingUp)
                     {
@@ -189,7 +309,7 @@ public class Putter : NetworkBehaviour, ICanControlCamera
                         isRotatingOnSpot = true;
                     }
                 }
-                else if (rb.linearVelocity.sqrMagnitude > 0.05f)
+                else if (velocityMagnitudeSquared > 0.0025f) // 0.05f al cuadrado
                 {
                     isRotatingOnSpot = false;
                     standUpTimer = 0f;
@@ -198,7 +318,7 @@ public class Putter : NetworkBehaviour, ICanControlCamera
                 }
             }
 
-            // Double-click time detection
+            // Double-click detection
             if (firstClickRegistered)
             {
                 clickTimer += Time.fixedDeltaTime;
@@ -209,89 +329,10 @@ public class Putter : NetworkBehaviour, ICanControlCamera
                 }
             }
 
-            // Began dragging
-            if (CurrInput.isDragging && !prevInput.isDragging)
-            {
-                if (firstClickRegistered && clickTimer <= doubleClickThreshold)
-                {
-                    Debug.Log("Double Click Detected! Attempting Ability...");
-                    if (baseAbility != null) baseAbility.ActivateAbility(this);
+            // Input handling
+            HandleInputLogic();
 
-                    firstClickRegistered = false;
-                    clickTimer = 0f;
-                }
-                else
-                {
-                    Debug.Log("First Click Detected!");
-                    firstClickRegistered = true;
-                    clickTimer = 0f;
-                }
-
-                if (CameraController.HasControl(this)) HUD.ShowPuttCharge();
-                Debug.Log("Starting Drag");
-
-                swingAngle = 0f;
-                swingDirection = (Random.value > 0.5f) ? 1f : -1f;
-            }
-
-            // Still dragging
-            if (CurrInput.isDragging)
-            {
-                PuttStrength = Mathf.Clamp(PuttStrength - (CurrInput.dragDelta * puttGainFactor), 0, maxPuttStrength);
-                if (CameraController.HasControl(this))
-                {
-                    HUD.SetPuttCharge(PuttStrengthNormalized, CanPutt);
-
-                    guideArrow.localScale = new Vector3(1, 1, PuttStrengthNormalized * 1.5f);
-                    guideArrowRen.material.SetColor("_EmissionColor", HUD.Instance.PuttChargeColor.Evaluate(PuttStrengthNormalized) * Color.gray);
-                }
-
-                swingAngle += swingDirection * swingSpeed * Time.fixedDeltaTime;
-
-                if (Mathf.Abs(swingAngle) >= maxSwingAngle)
-                {
-                    swingDirection *= -1f;
-                    swingAngle = Mathf.Clamp(swingAngle, -maxSwingAngle, maxSwingAngle);
-                }
-            }
-
-            // Stopped dragging
-            if (!CurrInput.isDragging && prevInput.isDragging)
-            {
-                if (CanPutt && PuttStrength > 0)
-                {
-                    Vector3 fwd = Quaternion.AngleAxis((float)CurrInput.yaw + swingAngle, Vector3.up) * Vector3.forward;
-
-                    Quaternion targetRotation = Quaternion.LookRotation(new Vector3(fwd.x, 0, fwd.z));
-                    transform.rotation = targetRotation;
-
-                    if (isGroundedCached) rb.AddForce(fwd * PuttStrength, ForceMode.VelocityChange);
-                    else rb.linearVelocity = fwd * PuttStrength;
-
-                    PuttTimer = TickTimer.CreateFromSeconds(Runner, 3);
-                    PlayerObj.Strokes++;
-
-                    if (CameraController.HasControl(this))
-                    {
-                        HUD.SetStrokeCount(PlayerObj.Strokes);
-                    }
-                }
-
-                PuttStrength = 0;
-                if (CameraController.HasControl(this))
-                {
-                    HUD.HidePuttCharge();
-                    guideArrow.localScale = new Vector3(1, 1, 0);
-                }
-            }
-
-            if (CameraController.HasControl(this) && !isFirstUpdate)
-            {
-                if (!CanPutt && couldPutt) HUD.ShowPuttCooldown();
-                if (CanPutt && !couldPutt) HUD.HidePuttCooldown();
-                if (PuttTimer.RemainingTime(Runner).HasValue) HUD.SetPuttCooldown(PuttTimer.RemainingTime(Runner).Value / 3f);
-            }
-
+            // SEPARAR UI UPDATES del network thread - movido a Update()
             couldPutt = CanPutt;
             prevInput = CurrInput;
             prevVelocity = rb.linearVelocity;
@@ -299,13 +340,20 @@ public class Putter : NetworkBehaviour, ICanControlCamera
             isFirstUpdate = false;
         }
 
+        // Rotation en el lugar
         if (isRotatingOnSpot)
         {
             Quaternion targetRotation = Quaternion.AngleAxis((float)yaw, Vector3.up);
             transform.rotation = Quaternion.Lerp(transform.rotation, targetRotation, Time.fixedDeltaTime * 5f);
+            
+            if (Object.HasInputAuthority)
+            {
+                NetworkRotation = transform.rotation;
+            }
         }
 
-        if (isGroundedCached && rb.linearVelocity.sqrMagnitude > 0.00001f)
+        // Physics damping optimizado
+        if (isGroundedCached && velocityMagnitudeSquared > 0.00001f)
         {
             rb.linearVelocity = Vector3.MoveTowards(rb.linearVelocity, Vector3.zero, Time.fixedDeltaTime * speedLoss);
             if (rb.linearVelocity.sqrMagnitude <= 0.00001f)
@@ -317,6 +365,101 @@ public class Putter : NetworkBehaviour, ICanControlCamera
                 }
             }
         }
+    }
+
+    private void HandleInputLogic()
+    {
+        // Began dragging
+        if (CurrInput.isDragging && !prevInput.isDragging)
+        {
+            if (firstClickRegistered && clickTimer <= doubleClickThreshold)
+            {
+                Debug.Log("Double Click Detected! Attempting Ability...");
+                if (baseAbility != null) baseAbility.ActivateAbility(this);
+
+                firstClickRegistered = false;
+                clickTimer = 0f;
+            }
+            else
+            {
+                Debug.Log("First Click Detected!");
+                firstClickRegistered = true;
+                clickTimer = 0f;
+            }
+
+            if (CameraController.HasControl(this)) HUD.ShowPuttCharge();
+
+            swingAngle = 0f;
+            swingDirection = (Random.value > 0.5f) ? 1f : -1f;
+        }
+
+        // Still dragging
+        if (CurrInput.isDragging)
+        {
+            PuttStrength = Mathf.Clamp(PuttStrength - (CurrInput.dragDelta * puttGainFactor), 0, maxPuttStrength);
+            
+            // UI updates solo si tienes control
+            if (CameraController.HasControl(this))
+            {
+                HUD.SetPuttCharge(PuttStrengthNormalized, CanPutt);
+                guideArrow.localScale = new Vector3(1, 1, PuttStrengthNormalized * 1.5f);
+                guideArrowRen.material.SetColor("_EmissionColor", HUD.Instance.PuttChargeColor.Evaluate(PuttStrengthNormalized) * Color.gray);
+            }
+
+            // Swing oscillation
+            swingAngle += swingDirection * swingSpeed * Time.fixedDeltaTime;
+            if (Mathf.Abs(swingAngle) >= maxSwingAngle)
+            {
+                swingDirection *= -1f;
+                swingAngle = Mathf.Clamp(swingAngle, -maxSwingAngle, maxSwingAngle);
+            }
+        }
+
+        // Stopped dragging
+        if (!CurrInput.isDragging && prevInput.isDragging)
+        {
+            if (CanPutt && PuttStrength > 0)
+            {
+                Vector3 fwd = Quaternion.AngleAxis((float)CurrInput.yaw + swingAngle, Vector3.up) * Vector3.forward;
+                Quaternion targetRotation = Quaternion.LookRotation(new Vector3(fwd.x, 0, fwd.z));
+                transform.rotation = targetRotation;
+
+                if (isGroundedCached) 
+                    rb.AddForce(fwd * PuttStrength, ForceMode.VelocityChange);
+                else 
+                    rb.linearVelocity = fwd * PuttStrength;
+
+                PuttTimer = TickTimer.CreateFromSeconds(Runner, 3);
+                PlayerObj.Strokes++;
+
+                // Forzar sincronización inmediata después del golpe
+                if (Object.HasInputAuthority)
+                {
+                    NetworkPosition = transform.position;
+                    NetworkRotation = transform.rotation;
+                    NetworkVelocity = rb.linearVelocity;
+                    IsMoving = true;
+                    networkSyncTick = 0; // Reset counter para sync inmediato
+                }
+
+                if (CameraController.HasControl(this))
+                {
+                    HUD.SetStrokeCount(PlayerObj.Strokes);
+                }
+            }
+
+            PuttStrength = 0;
+            if (CameraController.HasControl(this))
+            {
+                HUD.HidePuttCharge();
+                guideArrow.localScale = new Vector3(1, 1, 0);
+            }
+        }
+    }
+
+    private void OnNetworkDataChanged()
+    {
+        // Callback vacío - interpolación manejada en LateUpdate
     }
 
     private IEnumerator StandUpRoutine()
@@ -331,11 +474,22 @@ public class Putter : NetworkBehaviour, ICanControlCamera
         while (elapsedTime < standingTime)
         {
             transform.rotation = Quaternion.Slerp(initialRotation, targetRotation, elapsedTime / standingTime);
+            
+            if (Object.HasInputAuthority)
+            {
+                NetworkRotation = transform.rotation;
+            }
+            
             elapsedTime += Time.fixedDeltaTime;
             yield return null;
         }
 
         transform.rotation = targetRotation;
+        
+        if (Object.HasInputAuthority)
+        {
+            NetworkRotation = transform.rotation;
+        }
     }
 
     [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
@@ -346,6 +500,14 @@ public class Putter : NetworkBehaviour, ICanControlCamera
 
         rb.linearVelocity = rb.angularVelocity = Vector3.zero;
         rb.MovePosition(Level.Current.GetSpawnPosition(PlayerObj.Index));
+        
+        if (Object.HasInputAuthority)
+        {
+            NetworkPosition = transform.position;
+            NetworkRotation = transform.rotation;
+            NetworkVelocity = Vector3.zero;
+            IsMoving = false;
+        }
     }
 
     bool IsGrounded()

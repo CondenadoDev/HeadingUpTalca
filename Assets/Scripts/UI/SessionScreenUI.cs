@@ -304,12 +304,16 @@ public class SessionScreenUI : MonoBehaviour
 
     public void StartGame()
     {
-        readyButton.onClick.RemoveAllListeners();
-        readyButton.onClick.AddListener(OnReadyButtonClicked);
-        if (PlayerRegistry.CountPlayers > 0)
+        if (!GameManager.CanStartGame())
         {
-            GameManager.State.Server_SetState(GameState.EGameState.Loading);
+            Debug.LogError("Cannot start game due to player count issues");
+            return;
         }
+
+        int activePlayers = PlayerRegistry.CountPlayers;
+        Debug.Log($"Starting game with {activePlayers}/{GameManager.MAX_PLAYERS} players");
+    
+        GameManager.State.Server_SetState(GameState.EGameState.Loading);
     }
 
     public void EditSession()

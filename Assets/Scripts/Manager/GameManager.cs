@@ -10,6 +10,7 @@ using static Level;
 
 public class GameManager : NetworkBehaviour, INetworkRunnerCallbacks
 {
+    public const int MAX_PLAYERS = 8;
     public static GameState State => Instance._gameState;
     public static ScoreMode ScoreGameMode = ScoreMode.Minigolf; // Set dynamically based on level
     public static LevelGameMode CurrentGameMode = LevelGameMode.NoExtraRules; // Set dynamically based on level
@@ -92,6 +93,27 @@ public class GameManager : NetworkBehaviour, INetworkRunnerCallbacks
     public void Rpc_LoadGameMode()
     {
         CurrentGameMode = Level.Current.GetGameMode();
+    }
+
+    // MÉTODO ESTÁTICO para validación - Este sí va aquí
+    public static bool CanStartGame()
+    {
+        int activePlayers = PlayerRegistry.CountPlayers;
+        
+        if (activePlayers == 0)
+        {
+            Debug.LogError("Cannot start game: No players in session");
+            return false;
+        }
+        
+        if (activePlayers > MAX_PLAYERS)
+        {
+            Debug.LogError($"Cannot start game: Too many players ({activePlayers}/{MAX_PLAYERS})");
+            return false;
+        }
+        
+        Debug.Log($"Game can start with {activePlayers}/{MAX_PLAYERS} players");
+        return true;
     }
 
     public static void PlayerDNF(PlayerObject player)
