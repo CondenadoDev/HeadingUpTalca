@@ -14,7 +14,6 @@ public class Putter : NetworkBehaviour, ICanControlCamera
     public Transform guideArrow;
     public MeshRenderer guideArrowRen;
     public MeshRenderer ren;
-    public Rigidbody rb;
     new public SphereCollider collider;
     public float maxPuttStrength;
     public float puttGainFactor = 0.1f;
@@ -37,18 +36,18 @@ public class Putter : NetworkBehaviour, ICanControlCamera
     public MeshRenderer skinMeshRenderer;
 
     // FORCE OSCILLATION
-    private float swingAngle = 0f; // Current Swing Angle
-    private float swingDirection = 1f; // Direction for the random swing. 1 for right, -1 for left
-    public float swingSpeed = 70f; // Speed Rotation. Degrees per second
-    public float maxSwingAngle = 30f; // Max Oscillation Angle
+    private float swingAngle = 0f;
+    private float swingDirection = 1f;
+    public float swingSpeed = 70f;
+    public float maxSwingAngle = 30f;
 
     // ABILITY
-    public BaseAbility baseAbility; // Reference to the Base Ability
+    public BaseAbility baseAbility;
 
-    // DOUBLE ClICK
-    private float clickTimer = 0f; // Click timer
-    private const float doubleClickThreshold = 0.3f; // Time window for double-click
-    private bool firstClickRegistered = false; // If the first clikc was registered.
+    // DOUBLE CLICK
+    private float clickTimer = 0f;
+    private const float doubleClickThreshold = 0.3f;
+    private bool firstClickRegistered = false;
 
     // SCRIPTS
     private BarrierGenerator barrierGenerator;
@@ -65,12 +64,10 @@ public class Putter : NetworkBehaviour, ICanControlCamera
     public TickTimer PuttTimer { get; set; }
     public bool CanPutt => PuttTimer.ExpiredOrNotRunning(Runner);
     public bool couldPutt;
-
+    
     [Networked]
     float PuttStrength { get; set; }
-    float PuttStrengthNormalized => PuttStrength / maxPuttStrength; // The actual strength of the pushing force.
-
-
+    float PuttStrengthNormalized => PuttStrength / maxPuttStrength;
 
     [Networked]
     PlayerInput CurrInput { get; set; }
@@ -79,7 +76,15 @@ public class Putter : NetworkBehaviour, ICanControlCamera
     Vector3 prevVelocity = Vector3.zero;
     Angle yaw = default;
 
-    bool isFirstUpdate = true;
+    // OPTIMIZATION: Cache para Ability updates - CONSERVADOR  
+    private int abilityCooldownTick = 0;
+    private const int ABILITY_COOLDOWN_INTERVAL = 8; // Menos frecuente
+
+    // OPTIMIZATION: Cache para velocity magnitude
+    private float velocityMagnitudeSquared = 0f;
+    private bool isMovingCached = false;
+
+    public Rigidbody rb;
 
     private void Start()
     {
@@ -87,28 +92,37 @@ public class Putter : NetworkBehaviour, ICanControlCamera
         ApplyWeightSettings();
     }
 
+    private void Update()
+    {
+        // SEPARAR UI del networking thread - CRÍTICO
+        if (CameraController.HasControl(this))
+        {
+            UpdateUI();
+        }
+    }
+
+    private void UpdateUI()
+    {
+        // UI updates ejecutándose a 60fps en lugar de network rate
+        if (!CanPutt && couldPutt) HUD.ShowPuttCooldown();
+        if (CanPutt && !couldPutt) HUD.HidePuttCooldown();
+        if (PuttTimer.RemainingTime(Runner).HasValue) 
+        {
+            HUD.SetPuttCooldown(PuttTimer.RemainingTime(Runner).Value / 3f);
+        }
+    }
+
     private void LateUpdate()
     {
         if (CameraController.HasControl(this))
         {
-            // Update arrow rotation
+            // Update arrow rotation - más suave
             guideArrow.rotation = Quaternion.AngleAxis((float)yaw + swingAngle, Vector3.up);
         }
+
+        // INTERPOLACIÓN COMPLETAMENTE REMOVIDA - Dejar que Fusion maneje todo
+        // Fusion ya tiene su propio sistema de interpolación que funciona perfectamente
     }
-
-    //private void OnCollisionEnter(Collision collision)
-    //{
-    //	if (Runner.IsServer == false) Debug.Log("OnCollisionEnter client");
-
-    //	if (CameraController.HasControl(this))
-    //	{
-    //		float dot = Vector3.Dot(rb.velocity.normalized, collision.impulse.normalized);
-    //		if (dot > 0 && collision.impulse.magnitude > shakeImpulseThreshold)
-    //		{
-    //			CameraController.Instance.Shake.TriggerShake(collision.impulse.magnitude * dot * shakeCollisionAmount, shakeCollisionLambda);
-    //		}
-    //	}
-    //}
 
     public override void Spawned()
     {
@@ -117,7 +131,7 @@ public class Putter : NetworkBehaviour, ICanControlCamera
         PlayerObj.Controller = this;
 
         ren.material.color = PlayerObj.Color;
-        ApplySkin(); // Apply the player's skin
+        ApplySkin();
         skinMeshRenderer.material.color = PlayerObj.Color;
 
         if (Object.HasInputAuthority)
@@ -129,7 +143,6 @@ public class Putter : NetworkBehaviour, ICanControlCamera
             Instantiate(ResourcesManager.Instance.worldNicknamePrefab, InterfaceManager.Instance.worldCanvas.transform).SetTarget(this);
         }
     }
-
 
     public override void Despawned(NetworkRunner runner, bool hasState)
     {
@@ -156,19 +169,28 @@ public class Putter : NetworkBehaviour, ICanControlCamera
 
         if (Runner.IsForward)
         {
-            if (baseAbility != null) baseAbility.TickCooldown();
+            // OPTIMIZATION: Cache velocity calculations una sola vez
+            velocityMagnitudeSquared = rb.linearVelocity.sqrMagnitude;
+            isMovingCached = velocityMagnitudeSquared > 0.0001f;
 
-            // Assuming you have a Rigidbody for movement
-            if (rb != null && rb.linearVelocity.magnitude > 0.01f)
+            // OPTIMIZATION: Ability cooldown menos frecuente
+            abilityCooldownTick++;
+            if (abilityCooldownTick >= ABILITY_COOLDOWN_INTERVAL)
             {
-                // Store only the horizontal movement (ignoring Y-axis)
+                if (baseAbility != null) baseAbility.TickCooldown();
+                abilityCooldownTick = 0;
+            }
+
+            // Store velocity for movement tracking - solo si se está moviendo
+            if (isMovingCached)
+            {
                 lastVelocity = new Vector3(rb.linearVelocity.x, 0, rb.linearVelocity.z);
             }
 
+            // Movement logic - ORIGINAL sin cache de IsGrounded
             if (IsGrounded())
             {
-
-                if (rb.linearVelocity.sqrMagnitude <= 0.00001f)
+                if (velocityMagnitudeSquared <= 0.00001f)
                 {
                     if (!isStandingUp)
                     {
@@ -184,142 +206,45 @@ public class Putter : NetworkBehaviour, ICanControlCamera
                         isRotatingOnSpot = true;
                     }
                 }
-                else if (rb.linearVelocity.sqrMagnitude > 0.05f) // Prevents unwanted standing when moving
+                else if (velocityMagnitudeSquared > 0.0025f) // 0.05f al cuadrado
                 {
                     isRotatingOnSpot = false;
                     standUpTimer = 0f;
                     isStandingUp = false;
-                    StopCoroutine(StandUpRoutine()); // Cancels standing if ball starts moving
+                    StopCoroutine(StandUpRoutine());
                 }
             }
 
-
-            // Double-click time detection
+            // Double-click detection
             if (firstClickRegistered)
             {
                 clickTimer += Time.fixedDeltaTime;
                 if (clickTimer > doubleClickThreshold)
                 {
-                    firstClickRegistered = false; // Reset if time exceeds threshold
-                    clickTimer = 0f;
-                }
-            }
-
-            // Began dragging
-            if (CurrInput.isDragging && !prevInput.isDragging)
-            {
-                // Double-click detection for jump or other ability
-                if (firstClickRegistered && clickTimer <= doubleClickThreshold)
-                {
-                    Debug.Log("Double Click Detected! Attempting Ability...");
-                    if (baseAbility != null) baseAbility.ActivateAbility(this); // Call the Base Ability
-
-                    // Reset click tracking after activation
                     firstClickRegistered = false;
                     clickTimer = 0f;
                 }
-                else
-                {
-                    Debug.Log("First Click Detected!");
-                    firstClickRegistered = true;
-                    clickTimer = 0f; // Start counting time after first click
-                }
-
-                // Arrow Display
-                if (CameraController.HasControl(this)) HUD.ShowPuttCharge();
-                Debug.Log("Starting Drag");
-
-                // Reset arrow direction to center and pick a random swing direction
-                swingAngle = 0f;
-                swingDirection = (Random.value > 0.5f) ? 1f : -1f;
             }
 
-            // Still dragging
-            if (CurrInput.isDragging)
-            {
-                PuttStrength = Mathf.Clamp(PuttStrength - (CurrInput.dragDelta * puttGainFactor), 0, maxPuttStrength);
-                if (CameraController.HasControl(this))
-                {
-                    HUD.SetPuttCharge(PuttStrengthNormalized, CanPutt);
+            // Input handling
+            HandleInputLogic();
 
-                    guideArrow.localScale = new Vector3(1, 1, PuttStrengthNormalized * 1.5f);
-                    guideArrowRen.material.SetColor("_EmissionColor", HUD.Instance.PuttChargeColor.Evaluate(PuttStrengthNormalized) * Color.gray);
-                }
-
-                // Update arrow swing
-                swingAngle += swingDirection * swingSpeed * Time.fixedDeltaTime;
-
-                // If the current angle reaches the maximum angle
-                if (Mathf.Abs(swingAngle) >= maxSwingAngle)
-                {
-                    swingDirection *= -1f; // Reverse direction at limits
-                    swingAngle = Mathf.Clamp(swingAngle, -maxSwingAngle, maxSwingAngle);
-                }
-            }
-
-            // Stopped dragging
-            if (!CurrInput.isDragging && prevInput.isDragging)
-            {
-                if (CanPutt && PuttStrength > 0)
-                {
-                    // Apply the direction of the oscillated arrow
-                    Vector3 fwd = Quaternion.AngleAxis((float)CurrInput.yaw + swingAngle, Vector3.up) * Vector3.forward;
-
-                    // Rotate towards the direction of the force
-                    Quaternion targetRotation = Quaternion.LookRotation(new Vector3(fwd.x, 0, fwd.z));
-                    transform.rotation = targetRotation;
-
-                    // If is grounded, apply the force
-                    if (IsGrounded()) rb.AddForce(fwd * PuttStrength, ForceMode.VelocityChange);
-                    else rb.linearVelocity = fwd * PuttStrength;
-
-                    PuttTimer = TickTimer.CreateFromSeconds(Runner, 3);
-                    PlayerObj.Strokes++;
-
-                    if (CameraController.HasControl(this))
-                    {
-                        HUD.SetStrokeCount(PlayerObj.Strokes);
-                    }
-                }
-
-                PuttStrength = 0;
-                if (CameraController.HasControl(this))
-                {
-                    HUD.HidePuttCharge();
-                    guideArrow.localScale = new Vector3(1, 1, 0);
-                }
-            }
-
-            if (CameraController.HasControl(this) && !isFirstUpdate)
-            {
-                if (!CanPutt && couldPutt) HUD.ShowPuttCooldown();
-                if (CanPutt && !couldPutt) HUD.HidePuttCooldown();
-                if (PuttTimer.RemainingTime(Runner).HasValue) HUD.SetPuttCooldown(PuttTimer.RemainingTime(Runner).Value / 3f);
-
-                //Vector3 impulse = rb.velocity - prevVelocity;
-
-                //float dot = Vector3.Dot(rb.velocity.normalized, prevVelocity.normalized);
-                //Vector3 delta = (rb.velocity - prevVelocity);
-                //if (dot > 0 && delta.magnitude > shakeImpulseThreshold)
-                //{
-                //	CameraController.Instance.Shake.TriggerShake(delta.magnitude * dot * shakeCollisionAmount, shakeCollisionLambda);
-                //}
-            }
-
+            // Store previous values - UI updates movido a Update()
             couldPutt = CanPutt;
             prevInput = CurrInput;
             prevVelocity = rb.linearVelocity;
             yaw = CurrInput.yaw;
-            isFirstUpdate = false;
         }
 
+        // Rotation en el lugar
         if (isRotatingOnSpot)
         {
             Quaternion targetRotation = Quaternion.AngleAxis((float)yaw, Vector3.up);
-            transform.rotation = Quaternion.Lerp(transform.rotation, targetRotation, Time.fixedDeltaTime * 5f); // Smooth rotation
+            transform.rotation = Quaternion.Lerp(transform.rotation, targetRotation, Time.fixedDeltaTime * 5f);
         }
 
-        if (IsGrounded() && rb.linearVelocity.sqrMagnitude > 0.00001f)
+        // Physics damping
+        if (IsGrounded() && velocityMagnitudeSquared > 0.00001f)
         {
             rb.linearVelocity = Vector3.MoveTowards(rb.linearVelocity, Vector3.zero, Time.fixedDeltaTime * speedLoss);
             if (rb.linearVelocity.sqrMagnitude <= 0.00001f)
@@ -332,30 +257,104 @@ public class Putter : NetworkBehaviour, ICanControlCamera
             }
         }
     }
+
+    private void HandleInputLogic()
+    {
+        // Began dragging
+        if (CurrInput.isDragging && !prevInput.isDragging)
+        {
+            if (firstClickRegistered && clickTimer <= doubleClickThreshold)
+            {
+                Debug.Log("Double Click Detected! Attempting Ability...");
+                if (baseAbility != null) baseAbility.ActivateAbility(this);
+
+                firstClickRegistered = false;
+                clickTimer = 0f;
+            }
+            else
+            {
+                Debug.Log("First Click Detected!");
+                firstClickRegistered = true;
+                clickTimer = 0f;
+            }
+
+            if (CameraController.HasControl(this)) HUD.ShowPuttCharge();
+
+            swingAngle = 0f;
+            swingDirection = (Random.value > 0.5f) ? 1f : -1f;
+        }
+
+        // Still dragging
+        if (CurrInput.isDragging)
+        {
+            PuttStrength = Mathf.Clamp(PuttStrength - (CurrInput.dragDelta * puttGainFactor), 0, maxPuttStrength);
+            
+            // UI updates solo si tienes control
+            if (CameraController.HasControl(this))
+            {
+                HUD.SetPuttCharge(PuttStrengthNormalized, CanPutt);
+                guideArrow.localScale = new Vector3(1, 1, PuttStrengthNormalized * 1.5f);
+                guideArrowRen.material.SetColor("_EmissionColor", HUD.Instance.PuttChargeColor.Evaluate(PuttStrengthNormalized) * Color.gray);
+            }
+
+            // Swing oscillation
+            swingAngle += swingDirection * swingSpeed * Time.fixedDeltaTime;
+            if (Mathf.Abs(swingAngle) >= maxSwingAngle)
+            {
+                swingDirection *= -1f;
+                swingAngle = Mathf.Clamp(swingAngle, -maxSwingAngle, maxSwingAngle);
+            }
+        }
+
+        // Stopped dragging
+        if (!CurrInput.isDragging && prevInput.isDragging)
+        {
+            if (CanPutt && PuttStrength > 0)
+            {
+                Vector3 fwd = Quaternion.AngleAxis((float)CurrInput.yaw + swingAngle, Vector3.up) * Vector3.forward;
+                Quaternion targetRotation = Quaternion.LookRotation(new Vector3(fwd.x, 0, fwd.z));
+                transform.rotation = targetRotation;
+
+                if (IsGrounded()) 
+                    rb.AddForce(fwd * PuttStrength, ForceMode.VelocityChange);
+                else 
+                    rb.linearVelocity = fwd * PuttStrength;
+
+                PuttTimer = TickTimer.CreateFromSeconds(Runner, 3);
+                PlayerObj.Strokes++;
+
+                if (CameraController.HasControl(this))
+                {
+                    HUD.SetStrokeCount(PlayerObj.Strokes);
+                }
+            }
+
+            PuttStrength = 0;
+            if (CameraController.HasControl(this))
+            {
+                HUD.HidePuttCharge();
+                guideArrow.localScale = new Vector3(1, 1, 0);
+            }
+        }
+    }
+
     private IEnumerator StandUpRoutine()
     {
         Quaternion initialRotation = transform.rotation;
-
-        // Calculate the direction from the velocity (on the horizontal plane)
-        Vector3 flatVelocity = new Vector3(lastVelocity.x, 0, lastVelocity.z); // Remove the Y component, we only care about the horizontal direction
-
-        // Calculate the rotation angle based on the horizontal direction of the velocity
+        Vector3 flatVelocity = new Vector3(lastVelocity.x, 0, lastVelocity.z);
         float targetYRotation = Mathf.Atan2(flatVelocity.x, flatVelocity.z) * Mathf.Rad2Deg;
-
-        // Combine this with the current Y rotation
-        Quaternion targetRotation = Quaternion.Euler(0, targetYRotation, 0); // Only rotating around the Y axis
+        Quaternion targetRotation = Quaternion.Euler(0, targetYRotation, 0);
 
         float elapsedTime = 0f;
 
         while (elapsedTime < standingTime)
         {
-            // Smooth transition to the target rotation
             transform.rotation = Quaternion.Slerp(initialRotation, targetRotation, elapsedTime / standingTime);
             elapsedTime += Time.fixedDeltaTime;
             yield return null;
         }
 
-        transform.rotation = targetRotation; // Ensure it fully reaches the target rotation
+        transform.rotation = targetRotation;
     }
 
     [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
@@ -389,6 +388,7 @@ public class Putter : NetworkBehaviour, ICanControlCamera
             HUD.SetLives(PlayerObj.Lives);
         }
     }
+
     public void ApplySkin()
     {
         if (PlayerObj != null && PlayerObj.Skin != null)
@@ -396,14 +396,11 @@ public class Putter : NetworkBehaviour, ICanControlCamera
             var SelectedSkin = ResourcesManager.Instance.GetSkin(PlayerObj.Skin);
             playerSkin = SelectedSkin;
 
-            // If there are model bones, use them instead
             if (playerSkin != null && playerSkin.ModelBones != null)
             {
-                // Hide existing mesh
                 if (skinMeshRenderer != null) skinMeshRenderer.enabled = false;
                 if (skinMeshFilter != null) skinMeshFilter.mesh = null;
 
-                // Instantiate ModelBones and attach to skinModel
                 GameObject modelInstance = Instantiate(playerSkin.ModelBones, skinModel);
                 BonesBase = modelInstance;
 
@@ -421,7 +418,6 @@ public class Putter : NetworkBehaviour, ICanControlCamera
             }
             else if (playerSkin != null)
             {
-                // Use normal skin mesh if no ModelBones are present
                 if (BonesBase != null) Destroy(BonesBase);
                 if (skinMeshFilter != null)
                 {
@@ -442,7 +438,6 @@ public class Putter : NetworkBehaviour, ICanControlCamera
         }
     }
 
-    // Add this attribute to make sure the method runs on all clients.
     [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
     public void Rpc_ApplyGameModeRules()
     {
@@ -471,6 +466,7 @@ public class Putter : NetworkBehaviour, ICanControlCamera
             Debug.Log("Normal game");
         }
     }
+
     private void ApplyWeightSettings()
     {
         switch (weightType)
